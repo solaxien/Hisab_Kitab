@@ -403,3 +403,26 @@ private fun sortLabel(sort: ProductSort): String = when (sort) {
     ProductSort.STOCK_LOW_FIRST -> "Low first"
     ProductSort.VALUE_HIGH_FIRST -> "Value"
 }
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true)
+@androidx.compose.runtime.Composable
+fun InventoryScreenPreview() {
+    com.amg.hisabkitab.ui.theme.HisabKitabTheme {
+        InventoryScreen(
+            state = com.amg.hisabkitab.ui.viewmodel.InventoryState(
+                totalCount = 10,
+                lowStockCount = 2,
+                valuePaise = 500000
+            ),
+            onNavigate = {},
+            onSettings = {},
+            onQuery = {},
+            onFilter = {},
+            onSort = {},
+            onSave = {},
+            onDelete = {},
+            onRestock = { _, _ -> },
+            onScan = {}
+        )
+    }
+}

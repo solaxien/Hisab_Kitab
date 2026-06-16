@@ -311,3 +311,32 @@ private fun LossDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true)
+@androidx.compose.runtime.Composable
+fun AnalyticsScreenPreview() {
+    val dummyProducts = listOf(
+        com.amg.hisabkitab.data.local.ProductEntity(1, "Product A", "123", "SKU1", 10000, 15000, 10, 5, 0, 0),
+        com.amg.hisabkitab.data.local.ProductEntity(2, "Product B", "456", "SKU2", 20000, 30000, 20, 5, 0, 0)
+    )
+    com.amg.hisabkitab.ui.theme.HisabKitabTheme {
+        AnalyticsScreen(
+            state = com.amg.hisabkitab.ui.viewmodel.AnalyticsState(
+                revenuePaise = 500000,
+                cashPaise = 200000,
+                upiPaise = 300000,
+                grossProfitPaise = 150000,
+                lossPaise = 10000,
+                netProfitPaise = 140000,
+                paidBills = 42,
+                dailyRevenuePaise = listOf(10000, 20000, 15000, 30000, 25000, 40000, 35000)
+            ),
+            products = dummyProducts,
+            onNavigate = {},
+            onSettings = {},
+            onPeriod = {},
+            onCustomRange = { _, _ -> },
+            onRecordLoss = { _, _, _, _ -> }
+        )
+    }
+}

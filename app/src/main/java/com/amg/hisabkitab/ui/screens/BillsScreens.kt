@@ -45,7 +45,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.amg.hisabkitab.data.local.BillEntity
+import com.amg.hisabkitab.data.local.BillItemEntity
 import com.amg.hisabkitab.data.local.BillStatus
 import com.amg.hisabkitab.data.local.BillWithItems
 import com.amg.hisabkitab.data.local.PaymentMode
@@ -55,6 +58,7 @@ import com.amg.hisabkitab.ui.common.dateTime
 import com.amg.hisabkitab.ui.common.money
 import com.amg.hisabkitab.ui.components.AppScaffold
 import com.amg.hisabkitab.ui.components.HkCard
+import com.amg.hisabkitab.ui.theme.HisabKitabTheme
 import com.amg.hisabkitab.ui.viewmodel.BillFilter
 import com.amg.hisabkitab.ui.viewmodel.BillsState
 
@@ -419,3 +423,75 @@ fun BillDetailScreen(
 
 private fun BillFilter.label(): String =
     name.lowercase().replaceFirstChar { it.uppercase() }
+
+
+@Preview(showBackground = true)
+@Composable
+fun BillsPreview() {
+    val mockBill = BillWithItems(
+        bill = BillEntity(
+            id = 1,
+            billNumber = "HK-1001",
+            customerName = "Rahul Sharma",
+            createdAt = System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis(),
+            status = BillStatus.ACTIVE
+        ),
+        items = listOf(
+            BillItemEntity(1, 1, 1, "Aashirvaad Atta 5kg", 45000, 48000, 1),
+            BillItemEntity(2, 1, 2, "Tata Salt 1kg", 2000, 2500, 2)
+        )
+    )
+
+    HisabKitabTheme {
+        BillsScreen(
+            state = BillsState(
+                bills = listOf(mockBill),
+                filter = BillFilter.ACTIVE
+            ),
+            onNavigate = {},
+            onSettings = {},
+            onQuery = {},
+            onFilter = {},
+            onCreate = {},
+            onOpen = {}
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun BillDetailPreview() {
+    val mockBill = BillWithItems(
+        bill = BillEntity(
+            id = 1,
+            billNumber = "HK-1001",
+            customerName = "Rahul Sharma",
+            createdAt = System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis(),
+            status = BillStatus.ACTIVE
+        ),
+        items = listOf(
+            BillItemEntity(1, 1, 1, "Aashirvaad Atta 5kg", 45000, 48000, 1),
+            BillItemEntity(2, 1, 2, "Tata Salt 1kg", 2000, 2500, 2)
+        )
+    )
+
+    HisabKitabTheme {
+        BillDetailScreen(
+            bill = mockBill,
+            products = emptyList(),
+            shortages = emptyList(),
+            onBack = {},
+            onAddProduct = {},
+            onScan = {},
+            onCustomerChange = {},
+            onQuantity = { _, _ -> },
+            onRemove = {},
+            onCancelBill = {},
+            onPay = {},
+            onForcePay = {},
+            onDismissShortage = {}
+        )
+    }
+}

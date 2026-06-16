@@ -1,15 +1,61 @@
-*.iml
-.gradle
+# Gradle files
+.gradle/
+build/
+/*/build/
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+/gradle-app.setting
+.navigation/
+
+# Android Studio / IntelliJ files
+*.iml
+.idea/workspace.xml
+.idea/libraries
+.idea/shelf
+.idea/assetWizardSettings.xml
+.idea/modules.xml
+.idea/navEditor.xml
+.idea/caches
+.idea/indexLayout.xml
+.idea/modules/
+*.ipr
+*.iws
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# Built artifacts
+*.apk
+*.ap_
+*.dex
+*.class
+bin/
+gen/
+out/
+
+# Log files
+*.log
+
+# Keystores (Important for security)
+*.jks
+*.keystore
+
+# Profiler and system files
+*.hprof
 .DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+Thumbs.db
+
+# Local development
 local.properties
+.gradle-local
+
+# OS generated files
+ehthumbs.db
+Icon?
+desktop.ini
+
+# App-specific
+app/google-services.json
+
+# Secrets and API keys
+secrets.properties
+local.defaults.properties

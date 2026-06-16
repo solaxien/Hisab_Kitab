@@ -3,9 +3,11 @@ package com.amg.hisabkitab.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -41,9 +43,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.amg.hisabkitab.data.local.SettingsEntity
 import com.amg.hisabkitab.ui.components.HkCard
+import com.amg.hisabkitab.ui.theme.HisabKitabTheme
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,7 +85,9 @@ fun SettingsScreen(
         }
     ) { padding ->
         LazyColumn(
-            Modifier.fillMaxSize().padding(padding),
+            Modifier
+                .fillMaxSize()
+                .padding(padding),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -92,6 +99,7 @@ fun SettingsScreen(
                         },
                         supportingContent = {
                             Column {
+                                Spacer(Modifier.size(4.dp))
                                 Text(settings.ownerName)
                                 Text(settings.phone.ifBlank { "Add phone number" })
                                 Text(settings.address.ifBlank { "Add shop address" })
@@ -283,3 +291,27 @@ private fun ProfileDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
+
+@Preview(showBackground = true)
+@Composable
+fun SettingsPreview() {
+    HisabKitabTheme {
+        SettingsScreen(
+            settings = SettingsEntity(
+                shopName = "Apka Kirana Store",
+                ownerName = "Amogh",
+                phone = "9876543210",
+                address = "123, Market Road, Bengaluru",
+                stockNotifications = true,
+                pinEnabled = false
+            ),
+            message = null,
+            onBack = {},
+            onSave = {},
+            onBackup = {},
+            onRestore = {},
+            onClearMessage = {}
+        )
+    }
+}
+

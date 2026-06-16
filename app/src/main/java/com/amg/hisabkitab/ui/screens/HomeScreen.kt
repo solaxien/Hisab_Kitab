@@ -187,3 +187,22 @@ fun EmptyMessage(text: String) {
         )
     }
 }
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true)
+@androidx.compose.runtime.Composable
+fun HomeScreenPreview() {
+    com.amg.hisabkitab.ui.theme.HisabKitabTheme {
+        HomeScreen(
+            state = com.amg.hisabkitab.ui.viewmodel.DashboardState(
+                ownerName = "Shop Owner",
+                todaySalesPaise = 150000,
+                cashPaise = 80000,
+                upiPaise = 70000
+            ),
+            onNavigate = {},
+            onSettings = {},
+            onCreateBill = {},
+            onOpenBill = {}
+        )
+    }
+}
