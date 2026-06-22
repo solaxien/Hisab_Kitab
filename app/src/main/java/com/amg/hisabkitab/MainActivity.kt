@@ -1,5 +1,6 @@
 package com.amg.hisabkitab
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -24,6 +25,8 @@ import java.time.format.DateTimeFormatter
 class MainActivity : ComponentActivity() {
     private val repository by lazy { (application as HisabKitabApplication).repository }
     private var settingsMessage by mutableStateOf<String?>(null)
+    private var launchAction by mutableStateOf<String?>(null)
+    private var launchBillId by mutableStateOf<Long?>(null)
 
     private val createBackup = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -67,6 +70,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        launchAction = intent.action
+        launchBillId = intent.getLongExtra(EXTRA_OPEN_BILL_ID, 0L).takeIf { it > 0L }
         enableEdgeToEdge()
         setContent {
             HisabKitabTheme {
@@ -82,10 +87,27 @@ class MainActivity : ComponentActivity() {
                             createBackup.launch("hisabkitab_backup_$date.json")
                         },
                         onRestore = { restoreBackup.launch(arrayOf("application/json", "text/plain")) },
-                        onClearSettingsMessage = { settingsMessage = null }
+                        onClearSettingsMessage = { settingsMessage = null },
+                        launchAction = launchAction,
+                        launchBillId = launchBillId,
+                        onLaunchActionConsumed = {
+                            launchAction = null
+                            launchBillId = null
+                        }
                     )
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        launchAction = intent.action
+        launchBillId = intent.getLongExtra(EXTRA_OPEN_BILL_ID, 0L).takeIf { it > 0L }
+    }
+
+    companion object {
+        const val EXTRA_OPEN_BILL_ID = "com.amg.hisabkitab.extra.OPEN_BILL_ID"
     }
 }

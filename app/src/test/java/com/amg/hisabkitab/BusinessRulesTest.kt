@@ -6,6 +6,7 @@ import com.amg.hisabkitab.domain.model.billProfitPaise
 import com.amg.hisabkitab.domain.model.billTotalPaise
 import com.amg.hisabkitab.domain.model.findStockShortages
 import com.amg.hisabkitab.domain.model.stockAfterSale
+import com.amg.hisabkitab.ui.common.parseRupees
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -37,5 +38,12 @@ class BusinessRulesTest {
     fun forcedPaymentNeverCreatesNegativeDisplayedStock() {
         assertEquals(0, stockAfterSale(current = 2, sold = 3))
         assertEquals(7, stockAfterSale(current = 10, sold = 3))
+    }
+
+    @Test
+    fun rupeeParserRejectsNegativeAndExcessScaleValues() {
+        assertEquals(12345L, parseRupees("123.45"))
+        assertEquals(null, parseRupees("-1"))
+        assertEquals(null, parseRupees("1.234"))
     }
 }

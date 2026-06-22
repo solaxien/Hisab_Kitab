@@ -1,5 +1,6 @@
 package com.amg.hisabkitab.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -115,14 +116,11 @@ fun HomeScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Column {
-                                Text(
-                                    money(bill.totalPaise),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                TextButton(onClick = { onOpenBill(bill.bill.id) }) { Text("Open") }
-                            }
+                            Text(
+                                money(bill.totalPaise),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
                     }
                 }

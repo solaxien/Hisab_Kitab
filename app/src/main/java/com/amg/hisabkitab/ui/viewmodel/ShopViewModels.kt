@@ -43,6 +43,8 @@ class InventoryViewModel(private val repository: ShopRepository) : ViewModel() {
     private val query = MutableStateFlow("")
     private val filter = MutableStateFlow(ProductFilter.ALL)
     private val sort = MutableStateFlow(ProductSort.NAME)
+    private val _newProductBarcode = MutableStateFlow<String?>(null)
+    val newProductBarcode: StateFlow<String?> = _newProductBarcode
 
     val state = combine(repository.products, query, filter, sort) { products, q, f, s ->
         val matching = products.filter {
@@ -74,16 +76,26 @@ class InventoryViewModel(private val repository: ShopRepository) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), InventoryState())
 
     fun setQuery(value: String) { query.value = value }
+    fun handleScannedBarcode(barcode: String, onHandled: () -> Unit) = viewModelScope.launch {
+        val normalized = barcode.trim()
+        if (repository.productByBarcode(normalized) != null) {
+            query.value = normalized
+        } else {
+            _newProductBarcode.value = normalized
+        }
+        onHandled()
+    }
+    fun consumeNewProductBarcode() { _newProductBarcode.value = null }
     fun setFilter(value: ProductFilter) { filter.value = value }
     fun setSort(value: ProductSort) { sort.value = value }
     fun save(product: ProductEntity) = viewModelScope.launch { repository.saveProduct(product) }
     fun delete(id: Long) = viewModelScope.launch { repository.deleteProduct(id) }
     fun restock(id: Long, quantity: Int) = viewModelScope.launch {
-        if (quantity > 0) repository.restock(id, quantity)
+        repository.restock(id, quantity)
     }
 }
 
-enum class BillFilter { ACTIVE, PAID, CANCELLED }
+enum class BillFilter { ALL, ACTIVE, PAID, CANCELLED }
 
 data class BillsState(
     val bills: List<BillWithItems> = emptyList(),
@@ -108,10 +120,9 @@ class BillsViewModel(private val repository: ShopRepository) : ViewModel() {
         val bills = values[0] as List<BillWithItems>
         val q = values[1] as String
         val f = values[2] as BillFilter
-        val status = BillStatus.valueOf(f.name)
         BillsState(
             bills = bills.filter {
-                it.bill.status == status &&
+                (f == BillFilter.ALL || it.bill.status.name == f.name) &&
                     (q.isBlank() || it.bill.billNumber.contains(q, true) ||
                         it.bill.customerName.orEmpty().contains(q, true))
             },
@@ -159,6 +170,9 @@ class BillsViewModel(private val repository: ShopRepository) : ViewModel() {
                     pendingMode.value = mode
                     pendingBill.value = id
                 }
+                PaymentResult.NotFound,
+                is PaymentResult.InvalidStatus,
+                is PaymentResult.MissingProducts -> clearPaymentWarning()
             }
         }
     fun forcePayment(onPaid: () -> Unit) {
@@ -173,7 +187,7 @@ class BillsViewModel(private val repository: ShopRepository) : ViewModel() {
     }
 }
 
-enum class AnalyticsPeriod { THIS_MONTH, LAST_MONTH, CUSTOM }
+enum class AnalyticsPeriod { TODAY, YESTERDAY, THIS_WEEK, LAST_WEEK }
 
 data class DashboardState(
     val ownerName: String = "Shop Owner",
@@ -185,7 +199,7 @@ data class DashboardState(
 )
 
 data class AnalyticsState(
-    val period: AnalyticsPeriod = AnalyticsPeriod.THIS_MONTH,
+    val period: AnalyticsPeriod = AnalyticsPeriod.TODAY,
     val revenuePaise: Long = 0,
     val cashPaise: Long = 0,
     val upiPaise: Long = 0,
@@ -201,8 +215,7 @@ data class AnalyticsState(
 }
 
 class DashboardViewModel(private val repository: ShopRepository) : ViewModel() {
-    private val period = MutableStateFlow(AnalyticsPeriod.THIS_MONTH)
-    private val customRange = MutableStateFlow<Pair<Long, Long>?>(null)
+    private val period = MutableStateFlow(AnalyticsPeriod.TODAY)
     val products = repository.products.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
@@ -222,9 +235,9 @@ class DashboardViewModel(private val repository: ShopRepository) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardState())
 
     val analytics: StateFlow<AnalyticsState> = combine(
-        repository.bills, repository.losses, period, customRange
-    ) { bills, losses, selected, custom ->
-        val (start, end) = rangeFor(selected, custom)
+        repository.bills, repository.losses, period
+    ) { bills, losses, selected ->
+        val (start, end) = rangeFor(selected)
         val paid = bills.filter {
             it.bill.status == BillStatus.PAID && (it.bill.paidAt ?: 0) in start until end
         }
@@ -253,29 +266,20 @@ class DashboardViewModel(private val repository: ShopRepository) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AnalyticsState())
 
     fun setPeriod(value: AnalyticsPeriod) { period.value = value }
-    fun setCustomRange(start: Long, endInclusive: Long) {
-        customRange.value = start to endInclusive + 86_400_000L
-        period.value = AnalyticsPeriod.CUSTOM
-    }
     fun recordLoss(productId: Long, quantity: Int, reason: LossReason, note: String?) =
         viewModelScope.launch {
-            if (quantity > 0) repository.recordLoss(productId, quantity, reason, note)
+            repository.recordLoss(productId, quantity, reason, note)
         }
 
-    private fun rangeFor(
-        selected: AnalyticsPeriod,
-        custom: Pair<Long, Long>?
-    ): Pair<Long, Long> {
+    private fun rangeFor(selected: AnalyticsPeriod): Pair<Long, Long> {
         val zone = ZoneId.of("Asia/Kolkata")
         val now = LocalDate.now(zone)
-        val first = now.withDayOfMonth(1)
+        val startOfThisWeek = now.minusDays((now.dayOfWeek.value - 1).toLong())
         val dates = when (selected) {
-            AnalyticsPeriod.THIS_MONTH -> first to first.plusMonths(1)
-            AnalyticsPeriod.LAST_MONTH -> first.minusMonths(1) to first
-            AnalyticsPeriod.CUSTOM -> {
-                if (custom != null) return custom
-                first to first.plusMonths(1)
-            }
+            AnalyticsPeriod.TODAY -> now to now.plusDays(1)
+            AnalyticsPeriod.YESTERDAY -> now.minusDays(1) to now
+            AnalyticsPeriod.THIS_WEEK -> startOfThisWeek to startOfThisWeek.plusWeeks(1)
+            AnalyticsPeriod.LAST_WEEK -> startOfThisWeek.minusWeeks(1) to startOfThisWeek
         }
         return dates.first.atStartOfDay(zone).toInstant().toEpochMilli() to
             dates.second.atStartOfDay(zone).toInstant().toEpochMilli()

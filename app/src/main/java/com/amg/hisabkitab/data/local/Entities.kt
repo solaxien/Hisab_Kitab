@@ -11,7 +11,7 @@ enum class LossReason { EXPIRED, DAMAGED, UNSOLD, MANUAL_CORRECTION, OTHER }
 
 @Entity(
     tableName = "products",
-    indices = [Index(value = ["barcode"], unique = true), Index(value = ["sku"], unique = true)]
+    indices = [Index(value = ["barcode"], unique = true), Index(value = ["sku"])]
 )
 data class ProductEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

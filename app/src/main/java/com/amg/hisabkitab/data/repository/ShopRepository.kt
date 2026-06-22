@@ -1,11 +1,16 @@
 package com.amg.hisabkitab.data.repository
 
+import android.database.sqlite.SQLiteConstraintException
 import com.amg.hisabkitab.data.local.BillEntity
-import com.amg.hisabkitab.data.local.BillStatus
+import com.amg.hisabkitab.data.local.BillMutationResult
 import com.amg.hisabkitab.data.local.HisabKitabDao
+import com.amg.hisabkitab.data.local.InventoryAdjustmentResult
+import com.amg.hisabkitab.data.local.LossRecordResult
 import com.amg.hisabkitab.data.local.LossReason
 import com.amg.hisabkitab.data.local.PaymentMode
 import com.amg.hisabkitab.data.local.PaymentResult
+import com.amg.hisabkitab.data.local.ProductDeleteResult
+import com.amg.hisabkitab.data.local.ProductSaveResult
 import com.amg.hisabkitab.data.local.ProductEntity
 import com.amg.hisabkitab.data.local.SettingsEntity
 import kotlinx.coroutines.flow.map
@@ -21,18 +26,34 @@ class ShopRepository(private val dao: HisabKitabDao) {
 
     fun bill(id: Long) = dao.observeBill(id)
 
-    suspend fun saveProduct(product: ProductEntity): Long {
+    suspend fun saveProduct(product: ProductEntity): ProductSaveResult {
+        if (!product.isValidForSave()) return ProductSaveResult.InvalidProduct
         val now = System.currentTimeMillis()
-        return if (product.id == 0L) {
-            dao.insertProduct(product.copy(createdAt = now, updatedAt = now))
-        } else {
-            dao.updateProduct(product.copy(updatedAt = now))
-            product.id
+        return try {
+            val id = if (product.id == 0L) {
+                dao.insertProduct(product.copy(createdAt = now, updatedAt = now))
+            } else {
+                dao.updateProduct(product.copy(updatedAt = now))
+                product.id
+            }
+            ProductSaveResult.Success(id)
+        } catch (_: SQLiteConstraintException) {
+            ProductSaveResult.DuplicateSkuOrBarcode
+        } catch (_: androidx.sqlite.SQLiteException) {
+            ProductSaveResult.DuplicateSkuOrBarcode
         }
     }
 
-    suspend fun deleteProduct(id: Long) = dao.deleteProduct(id)
-    suspend fun restock(id: Long, quantity: Int) =
+    private fun ProductEntity.isValidForSave(): Boolean =
+        name.isNotBlank() &&
+            barcode.isNotBlank() &&
+            purchasePricePaise >= 0 &&
+            sellingPricePaise >= 0 &&
+            stockQuantity >= 0 &&
+            lowStockThreshold >= 0
+
+    suspend fun deleteProduct(id: Long): ProductDeleteResult = dao.deleteProduct(id)
+    suspend fun restock(id: Long, quantity: Int): InventoryAdjustmentResult =
         dao.restock(id, quantity, System.currentTimeMillis())
 
     suspend fun createBill(customerName: String?): Long {
@@ -48,46 +69,38 @@ class ShopRepository(private val dao: HisabKitabDao) {
         )
     }
 
-    suspend fun addProduct(billId: Long, productId: Long) {
-        val product = dao.product(productId) ?: return
-        dao.addProductToBill(billId, product)
+    suspend fun addProduct(billId: Long, productId: Long): BillMutationResult {
+        val product = dao.product(productId) ?: return BillMutationResult.NotFound
+        return dao.addProductToBill(billId, product)
     }
 
     suspend fun addBarcode(billId: Long, barcode: String): Boolean {
         val product = dao.productByBarcode(barcode) ?: return false
-        dao.addProductToBill(billId, product)
-        return true
+        return dao.addProductToBill(billId, product) is BillMutationResult.Success
     }
 
-    suspend fun setQuantity(itemId: Long, billId: Long, quantity: Int) {
-        val item = dao.bill(billId)?.items?.firstOrNull { it.id == itemId } ?: return
-        if (quantity <= 0) dao.deleteBillItem(itemId)
-        else dao.updateBillItem(item.copy(quantity = quantity))
-    }
+    suspend fun productByBarcode(barcode: String): ProductEntity? =
+        dao.productByBarcode(barcode.trim())
 
-    suspend fun removeBillItem(id: Long) = dao.deleteBillItem(id)
+    suspend fun setQuantity(itemId: Long, billId: Long, quantity: Int): BillMutationResult =
+        dao.setBillItemQuantity(billId, itemId, quantity)
 
-    suspend fun updateCustomer(billId: Long, name: String) {
-        val current = dao.bill(billId)?.bill ?: return
-        dao.updateBill(
-            current.copy(
-                customerName = name.trim().ifBlank { null },
-                updatedAt = System.currentTimeMillis()
-            )
+    suspend fun removeBillItem(id: Long) = dao.deleteActiveBillItem(id)
+
+    suspend fun updateCustomer(billId: Long, name: String): BillMutationResult =
+        dao.updateCustomer(
+            billId = billId,
+            customerName = name.trim().ifBlank { null },
+            updatedAt = System.currentTimeMillis()
         )
-    }
 
-    suspend fun cancelBill(billId: Long) {
-        val current = dao.bill(billId)?.bill ?: return
-        if (current.status == BillStatus.ACTIVE) {
-            dao.updateBill(current.copy(status = BillStatus.CANCELLED, updatedAt = System.currentTimeMillis()))
-        }
-    }
+    suspend fun cancelBill(billId: Long): BillMutationResult =
+        dao.cancelBill(billId, System.currentTimeMillis())
 
     suspend fun payBill(id: Long, mode: PaymentMode, force: Boolean): PaymentResult =
         dao.payBill(id, mode, force, System.currentTimeMillis())
 
-    suspend fun recordLoss(productId: Long, quantity: Int, reason: LossReason, note: String?) =
+    suspend fun recordLoss(productId: Long, quantity: Int, reason: LossReason, note: String?): LossRecordResult =
         dao.recordLoss(productId, quantity, reason, note, System.currentTimeMillis())
 
     suspend fun saveSettings(settings: SettingsEntity) = dao.saveSettings(settings)

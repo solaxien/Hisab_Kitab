@@ -1,6 +1,7 @@
 package com.amg.hisabkitab.ui.common
 
 import java.text.NumberFormat
+import java.math.RoundingMode
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -22,7 +23,13 @@ fun date(timestamp: Long): String =
     Instant.ofEpochMilli(timestamp).atZone(zone).format(date)
 
 fun parseRupees(value: String): Long? =
-    value.trim().toBigDecimalOrNull()?.movePointRight(2)?.toLong()
+    value.trim()
+        .toBigDecimalOrNull()
+        ?.takeIf { it.signum() >= 0 && it.scale() <= 2 }
+        ?.movePointRight(2)
+        ?.setScale(0, RoundingMode.UNNECESSARY)
+        ?.takeIf { it <= Long.MAX_VALUE.toBigDecimal() }
+        ?.toLong()
 
 fun currentDayStart(): Long =
     java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()

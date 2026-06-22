@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">Hisab Kitab</string>
+    <string name="shortcut_new_bill_short">New Bill</string>
+    <string name="shortcut_new_bill_long">Create New Bill</string>
+    <string name="shortcut_add_item_short">Add Item</string>
+    <string name="shortcut_add_item_long">Add Inventory Item</string>
 </resources>

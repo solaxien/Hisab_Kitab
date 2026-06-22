@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new_bill"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_new_bill_short"
+        android:shortcutLongLabel="@string/shortcut_new_bill_long">
+        <intent
+            android:action="com.amg.hisabkitab.action.NEW_BILL"
+            android:targetPackage="com.amg.hisabkitab"
+            android:targetClass="com.amg.hisabkitab.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="add_item"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_add_item_short"
+        android:shortcutLongLabel="@string/shortcut_add_item_long">
+        <intent
+            android:action="com.amg.hisabkitab.action.ADD_ITEM"
+            android:targetPackage="com.amg.hisabkitab"
+            android:targetClass="com.amg.hisabkitab.MainActivity" />
+    </shortcut>
+</shortcuts>

@@ -38,9 +38,9 @@ data class MainDestination(
 
 val mainDestinations = listOf(
     MainDestination("home", "Home", Icons.Outlined.Home),
-    MainDestination("analytics", "Analytics", Icons.Outlined.Analytics),
     MainDestination("bills", "Bills", Icons.AutoMirrored.Outlined.ReceiptLong),
-    MainDestination("inventory", "Inventory", Icons.Outlined.Inventory2)
+    MainDestination("inventory", "Inventory", Icons.Outlined.Inventory2),
+    MainDestination("analytics", "Analytics", Icons.Outlined.Analytics)
 )
 
 @OptIn(ExperimentalMaterial3Api::class)

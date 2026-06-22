@@ -200,6 +200,7 @@ fun BillDetailScreen(
     onDismissShortage: () -> Unit
 ) {
     var showProducts by remember { mutableStateOf(false) }
+    var productQuery by remember { mutableStateOf("") }
     var showPayment by remember { mutableStateOf(false) }
     var confirmCancel by remember { mutableStateOf(false) }
     var selectedPayment by remember { mutableStateOf(PaymentMode.CASH) }
@@ -347,8 +348,27 @@ fun BillDetailScreen(
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
                 style = MaterialTheme.typography.titleLarge
             )
+            OutlinedTextField(
+                value = productQuery,
+                onValueChange = { productQuery = it },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+                label = { Text("Search products") },
+                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (productQuery.isNotEmpty()) {
+                        IconButton(onClick = { productQuery = "" }) {
+                            Icon(Icons.Outlined.Clear, contentDescription = "Clear product search")
+                        }
+                    }
+                },
+                singleLine = true
+            )
+            val matchingProducts = products.filter { product ->
+                productQuery.isBlank() || product.name.contains(productQuery, true) ||
+                    product.sku.contains(productQuery, true) || product.barcode.contains(productQuery, true)
+            }
             LazyColumn(Modifier.navigationBarsPadding()) {
-                items(products, key = { it.id }) { product ->
+                items(matchingProducts, key = { it.id }) { product ->
                     ListItem(
                         headlineContent = { Text(product.name) },
                         supportingContent = { Text("${product.stockQuantity} in stock • ${product.sku}") },

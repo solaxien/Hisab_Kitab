@@ -1,510 +1,176 @@
 # HisabKitab Bug Report
 
-**Audit date:** 2026-06-16 11:58 IST
-**Branch:** `main`
-**Baseline:** commit `42fe82e` plus the current uncommitted working tree
-**Automation:** Bug Logger - HisabKitab (`bug-logger-hisabkitab`)
-**Recommendation:** Do not ship until the High-severity data-integrity issues are fixed.
+**Audit:** 22 June 2026 (IST)
+**Baseline:** `main` at `bf78eb30`, including all current uncommitted changes
 
-## Executive Summary
+## Summary
 
-The current working tree builds successfully. JVM tests pass, lint reports no
-errors, debug/release APKs package, and the Android-test APK packages. The
-main release risks are not build failures; they are silent data corruption,
-misleading financial analytics, and user operations that can fail without
-recoverable feedback.
+A full static/build audit found **17 actionable defects: 5 High and 12 Medium**. No Critical defect was found. Current changes fixed several earlier bill-integrity problems, but the app is not ready for real financial/inventory data until the five High findings are addressed.
 
-| Severity | Count |
-|---|---:|
-| Critical | 0 |
-| High | 7 |
-| Medium | 11 |
+## Verification
 
-Highest-priority work:
+- JVM tests: **5 passed, 0 failed**.
+- Android lint: **0 errors, 22 warnings**.
+- Debug and Android-test APKs were produced.
+- Android tests compiled/packaged but were not run (no device/emulator).
+- Production Kotlin, Room schema/DAO, repository, Compose UI, scanner, backup/restore, widgets, manifest, resources, tests, README, and TODO were inspected.
+- Gradle used repository-local caches. Debug, lint, unit-test, Android-test packaging, and unsigned release assembly all completed successfully; initial cache/signing failures were sandbox-only.
 
-1. Make every bill mutation transactional and legal only for `ACTIVE` bills.
-2. Prevent deletion or payment of products missing from active bills.
-3. Validate all product, quantity, money, loss, and restore values below the UI layer.
-4. Make backup export a consistent Room snapshot and harden restore validation.
-5. Correct India-local report boundaries, period rollover, and chart date gaps.
+## High Severity
 
-## Scope and Method
+### HK-001 — Deleting a product with loss history can throw
 
-The audit covered:
+`loss_entries.productId` is `RESTRICT` (`Entities.kt:63-71`), but `deleteProduct()` checks only active bills and does not catch the constraint failure (`HisabKitabDao.kt:192-195`). Repository/ViewModel also do not catch it (`ShopRepository.kt:56`, `ShopViewModels.kt:80`), and the UI closes the dialog immediately (`InventoryScreen.kt:205-213`).
 
-- Room entities, relations, queries, transactions, and schema constraints.
-- Product, bill, payment, loss, analytics, settings, backup, and restore flows.
-- Compose screens, navigation, barcode scanning, permissions, and manifest policy.
-- README/business expectation alignment and automated test coverage.
-- Debug/release compilation, JVM tests, lint, and Android-test packaging.
+**Impact:** a normal delete can raise an uncaught `SQLiteConstraintException`, silently fail, or terminate the process.
 
-This was a static and build-time audit. No emulator or device was connected, so
-camera behavior, runtime permissions, UI lifecycle behavior, and instrumented
-database behavior were not exercised on Android hardware.
+**Fix:** check loss references transactionally, return a typed result, and surface it without dismissing the dialog.
 
-## Verification Performed
+### HK-002 — Product editing overwrites newer stock
 
-Command run:
+The editor saves a complete entity containing stock captured when it opened (`InventoryScreen.kt:273-279,373-384`), and existing products use full-row `@Update` (`ShopRepository.kt:35-37`; `HisabKitabDao.kt:27-28`).
 
-```powershell
-$env:GRADLE_USER_HOME=(Resolve-Path '.gradle-local').Path
-.\gradlew.bat testDebugUnitTest lintDebug assembleDebug assembleRelease compileDebugAndroidTestKotlin assembleDebugAndroidTest --no-daemon
-git diff --check
-```
+**Impact:** a payment, restock, loss, widget action, or second task can change stock; a later metadata/price save writes stale stock and undoes that change.
 
-Results:
+**Fix:** separate metadata updates from stock adjustments, or use optimistic version checks.
 
-- `testDebugUnitTest`: passed, 4 tests, 0 failures, 0 errors.
-- `lintDebug`: passed, 0 errors and 22 warnings.
-- `assembleDebug`: passed.
-- `assembleRelease`: passed; release APK is unsigned.
-- `compileDebugAndroidTestKotlin`: passed.
-- `assembleDebugAndroidTest`: passed.
-- `git diff --check`: no whitespace errors; Git reported LF-to-CRLF conversion warnings for existing modified files.
+### HK-003 — Arithmetic overflow can corrupt financial data
 
-Build-environment note:
+Prices accept any non-negative `Long` and stock any non-negative `Int` (`ShopRepository.kt:47-54`). Totals use unchecked multiplication/addition (`BusinessRules.kt:7-11`; `ShopViewModels.kt:60-72,235-251`). `stockAfterSale` subtracts `Int` before clamping (`BusinessRules.kt:23`), and item count sums into `Int` (`Relations.kt:15`).
 
-- Android Gradle reported that `C:\Users\amogh\.android\analytics.settings`
-  is not writable in the sandbox. This did not block the build.
+**Impact:** accepted values can wrap negative/unrelated, corrupting stock, bills, profit, widgets, and analytics without an exception.
 
-Generated artifacts:
+**Fix:** enforce practical maxima and checked `Long` arithmetic everywhere, including restore.
 
-- `app/build/outputs/apk/debug/app-debug.apk`
-- `app/build/outputs/apk/release/app-release-unsigned.apk`
-- `app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk`
+### HK-004 — Backup export is not one database snapshot
 
-## Working Tree Context
+`BackupCodec.encode()` performs five independent DAO reads without an enclosing Room transaction (`BackupCodec.kt:16-25`).
 
-The audit included the current uncommitted working tree. Existing local changes
-were treated as intentional and were not reverted:
+**Impact:** concurrent payment/edit/delete/loss can create a backup whose tables represent different moments and restore misleading inventory/analytics.
 
-- Modified: `.idea/misc.xml`
-- Modified: `BugReport.md`
-- Deleted: `app/src/main/java/com/amg/hisabkitab/logic/Analytics.kt`
-- Deleted: `app/src/main/java/com/amg/hisabkitab/logic/Inventory.kt`
-- Modified: `app/src/main/java/com/amg/hisabkitab/ui/screens/AnalyticsScreen.kt`
-- Modified: `app/src/main/java/com/amg/hisabkitab/ui/screens/HomeScreen.kt`
-- Modified: `app/src/main/java/com/amg/hisabkitab/ui/screens/InventoryScreen.kt`
-- Untracked local cache/error output under `.android-local/`, `.gradle-local/`, and `.kotlin/errors/`
+**Fix:** read one snapshot through a transactional DAO method; serialize afterward. Add a concurrent-write test.
 
-## High-Severity Findings
+### HK-005 — Restore accepts invalid financial states
 
-### HK-001 - Deleting a product can make a paid bill skip stock deduction
+Validation only checks format/version, duplicate product/bill IDs, and basic references (`BackupCodec.kt:27-44`). It does not validate child/settings ID uniqueness, SKU/barcode uniqueness, positive IDs/timestamps, non-negative values, bill lifecycle combinations, one settings row, duplicate product lines, or size/count limits. `replaceAll()` then clears all tables (`HisabKitabDao.kt:161-178`).
 
-**Evidence:**
+**Impact:** malformed data can replace valid local data while containing negative quantities, impossible paid states, duplicates, or overflow values.
 
-- `app/src/main/java/com/amg/hisabkitab/data/local/Entities.kt:41-60`
-- `app/src/main/java/com/amg/hisabkitab/data/local/HisabKitabDao.kt:30-31`
-- `app/src/main/java/com/amg/hisabkitab/domain/model/BusinessRules.kt:13-20`
-- `app/src/main/java/com/amg/hisabkitab/data/local/HisabKitabDao.kt:169-193`
+**Fix:** fully validate a versioned model before replacement and add hostile-backup/rollback tests.
 
-`bill_items.productId` has no foreign key to `products`, and product deletion
-does not check active bill references. Payment loads referenced products with
-`mapNotNull`, so missing products disappear from shortage detection. The later
-stock update also skips missing products, then the bill is still marked paid.
+## Medium Severity
 
-**Reproduction:**
+### HK-006 — Typed operation failures are ignored
 
-1. Add a product to an active bill.
-2. Delete the product from Inventory.
-3. Pay the bill.
-4. Revenue/profit include the item, but no stock is deducted.
+ViewModels discard save/delete/restock/bill/loss results (`ShopViewModels.kt:79-83,137-149,263-266`); forms dismiss immediately (`InventoryScreen.kt:174-185,205-213`); payment missing/not-found/invalid states only clear warnings (`ShopViewModels.kt:162-164`).
 
-**Impact:** Inventory and financial records diverge silently.
+**Impact:** failed actions appear successful. Also, every `SQLiteException` is misreported internally as duplicate SKU/barcode.
 
-**Fix:** Block deletion while a product is referenced by an active bill. Payment
-must fail with a typed inconsistency result if any referenced product is missing.
+**Fix:** expose typed UI events, show exact errors, and dismiss only on success.
 
----
+### HK-007 — Forced payment loses the shortage discrepancy
 
-### HK-002 - Normal product operations can fail without usable feedback
+Payment clamps stock to zero without an audit record (`HisabKitabDao.kt:281-295`; dialog at `BillsScreens.kt:405-419`).
 
-**Evidence:**
+**Impact:** missing sold units are permanently lost, contrary to `README.md:145-163`.
 
-- Unique SKU/barcode constraints: `app/src/main/java/com/amg/hisabkitab/data/local/Entities.kt:12-15`
-- Restricted loss foreign key: `app/src/main/java/com/amg/hisabkitab/data/local/Entities.kt:63-71`
-- Fire-and-forget product writes: `app/src/main/java/com/amg/hisabkitab/ui/viewmodel/ShopViewModels.kt:79-83`
-- Dialogs close immediately: `app/src/main/java/com/amg/hisabkitab/ui/screens/InventoryScreen.kt:152-163`
+**Fix:** store bill/product/requested/available/missing/reason/timestamp in the payment transaction.
 
-Duplicate SKU/barcode saves and deletion of a product with loss history raise
-Room/SQLite exceptions. The launched coroutine has no error state, while the
-editor or confirmation UI closes immediately. Users can believe an operation
-succeeded or get an uncaught coroutine exception without an actionable message.
+### HK-008 — Monthly and custom analytics were removed
 
-**Impact:** Common inventory maintenance workflows can fail unclearly and leave
-users unsure whether data changed.
+**Evidence:** `AnalyticsPeriod` now contains only `TODAY`, `YESTERDAY`, `THIS_WEEK`, and `LAST_WEEK` (`ShopViewModels.kt:190`); the range function has no month or custom branch (`ShopViewModels.kt:275-285`). This conflicts with the monthly/custom analytics requirements in `README.md:17,81-96`.
 
-**Fix:** Return typed repository results, catch constraint exceptions, keep
-dialogs open until success, and show field-specific save/delete errors.
+**Impact:** users can no longer produce the monthly and arbitrary-date reports promised by the product specification; this is a functional regression from the prior implementation.
 
----
+**Fix:** restore This Month, Last Month, and Custom options. For custom selection, convert picker dates to `LocalDate` and build `Asia/Kolkata` start-of-day boundaries.
+### HK-009 — Shortage warning can belong to another bill
 
-### HK-003 - Invalid numeric product data can corrupt calculations
+State stores `pendingBillId`, but every detail receives the global shortage list (`ShopViewModels.kt:92-95,118-123`; `HisabKitabApp.kt:165-180`).
 
-**Evidence:**
+**Impact:** navigation/deep links can show bill A’s warning on bill B; confirm pays A and pops B.
 
-- Parseability-only validation: `app/src/main/java/com/amg/hisabkitab/ui/screens/InventoryScreen.kt:259-261`
-- Values persisted directly: `app/src/main/java/com/amg/hisabkitab/ui/screens/InventoryScreen.kt:301-314`
-- Inexact/unchecked money conversion: `app/src/main/java/com/amg/hisabkitab/ui/common/Formatters.kt:24-25`
-- No database checks: `app/src/main/java/com/amg/hisabkitab/data/local/Entities.kt:16-26`
-- Multiplication without overflow checks: `app/src/main/java/com/amg/hisabkitab/ui/viewmodel/ShopViewModels.kt:60-72`
+**Fix:** scope warning state to the displayed bill and clear it on exit.
 
-Negative prices, stock, and thresholds are accepted when pasted or entered with
-a hardware keyboard. Excess decimal places are truncated by `toLong()` rather
-than rejected. Large values can overflow stock addition, inventory value, line
-totals, profit, loss totals, and item quantity increments.
+### HK-010 — Bill numbers can collide
 
-**Impact:** Inventory value, profit, low-stock status, and bill totals can become
-incorrect or nonsensical.
+Numbers use the last five milliseconds plus a process-local counter modulo 10 (`ShopRepository.kt:25,60-66`) and have no unique index (`Entities.kt:29-38`).
 
-**Fix:** Enforce non-negative bounded values in the domain/repository layer, use
-exact money conversion with scale checks, use checked arithmetic, and add
-database constraints where Room supports them.
+**Fix:** use a persisted transactional sequence and database uniqueness.
 
----
+### HK-011 — Scanner errors and unknown barcodes are silent
 
-### HK-004 - Loss quantity can exceed stock and overstate financial loss
+Camera acquisition/back-camera binding lack failure handling (`BarcodeScannerScreen.kt:112-142`). Bill scanning always pops regardless of add result (`HisabKitabApp.kt:190-198`).
 
-**Evidence:**
+**Fix:** handle camera/provider/analyzer errors, offer manual entry, and keep unknown scans open with a create/search path.
 
-- UI accepts any positive quantity: `app/src/main/java/com/amg/hisabkitab/ui/screens/AnalyticsScreen.kt:253-309`
-- ViewModel checks only positivity: `app/src/main/java/com/amg/hisabkitab/ui/viewmodel/ShopViewModels.kt:260-263`
-- DAO records full loss but clamps stock: `app/src/main/java/com/amg/hisabkitab/data/local/HisabKitabDao.kt:196-221`
+### HK-012 — Time-based screens do not roll over
 
-Recording a loss of 10 when stock is 2 records loss for 10 units while inventory
-decreases by only 2 units.
+Today/month boundaries recalculate only when database/settings/filter flows emit (`ShopViewModels.kt:213-256,268-285`).
 
-**Impact:** Financial loss analytics can be inflated without a matching physical
-inventory movement.
+**Impact:** screens stay stale across midnight/month changes.
 
-**Fix:** Reject losses above available stock. Add a separate, explicit stock
-correction workflow for physical-count discrepancies.
+**Fix:** combine a local-date flow that emits at midnight and on resume/time/timezone changes.
 
----
+### HK-013 — Sales chart removes no-sale days
 
-### HK-005 - Custom analytics ranges use wrong India-local boundaries
+Only dates present in grouped paid bills become chart values (`ShopViewModels.kt:238-243`).
 
-**Evidence:**
+**Impact:** sales days separated by a week render as adjacent bars.
 
-- Date-picker UTC values are forwarded directly: `app/src/main/java/com/amg/hisabkitab/ui/screens/AnalyticsScreen.kt:196-215`
-- A fixed 24 hours is added: `app/src/main/java/com/amg/hisabkitab/ui/viewmodel/ShopViewModels.kt:256-258`
-- Standard periods use `Asia/Kolkata`: `app/src/main/java/com/amg/hisabkitab/ui/viewmodel/ShopViewModels.kt:265-281`
+**Fix:** generate every date in range and fill missing days with zero.
 
-Material date-picker values represent UTC date boundaries. A selected custom
-date therefore starts at 05:30 IST, excluding the first 5.5 hours of the selected
-start date and including 5.5 hours after the selected end date.
+### HK-014 — Widgets remain stale after mutations
 
-**Impact:** Custom sales and loss reports are wrong around every selected day
-boundary for India-local users.
+Widgets query only in `provideGlance()` (`HisabKitabWidgets.kt:80-185`) and rely on a 30-minute XML refresh; mutations never call `updateAll()`.
 
-**Fix:** Convert picker values to `LocalDate`, then calculate `[start, end)`
-instants with `ZoneId.of("Asia/Kolkata")`.
+**Impact:** payment/loss/restock/edit/restore can leave widgets wrong for 30 minutes; create-bill may retain a deleted selection.
 
----
+**Fix:** refresh affected widgets after each successful commit and restore.
 
-### HK-006 - Backup export is not a consistent database snapshot
+### HK-015 — Large backups can freeze or exhaust memory
 
-**Evidence:** `app/src/main/java/com/amg/hisabkitab/data/repository/BackupCodec.kt:16-25`
+Restore reads the entire file into one string (`MainActivity.kt:56-60`) then parses after returning to Main (`MainActivity.kt:62`; `BackupCodec.kt:27-44`). Export also builds all JSON in memory; no size limit exists.
 
-Products, bills, bill items, losses, and settings are read using five
-independent queries. A payment, loss, deletion, or edit between reads can combine
-records from different database states.
+**Fix:** validate/parse on IO, reject oversized input early, cap records/strings, and use streaming/zipped data.
 
-**Impact:** A backup can contain pre-payment stock with a post-payment bill, or
-broken references that its own restore validator rejects.
+### HK-016 — Settings expose non-functional features
 
-**Fix:** Read all backup tables inside one Room transaction/snapshot and test
-export while concurrent writes are attempted.
+Notification/PIN toggles only store booleans (`SettingsScreen.kt:138-155`); no alerts, permission flow, PIN setup, or lock exists. Appearance/support handlers are empty (`SettingsScreen.kt:148-162`).
 
----
+**Impact:** users can enable security/alerts that do nothing.
 
-### HK-007 - Bill edits can race with payment and corrupt status or stock
+**Fix:** hide/disable with explicit status or implement end-to-end.
 
-**Evidence:**
+### HK-017 — Platform backup policy is unspecified
 
-- Repository read/modify/write operations are not transactional:
-  `app/src/main/java/com/amg/hisabkitab/data/repository/ShopRepository.kt:62-84`
-- Customer updates run on every keystroke:
-  `app/src/main/java/com/amg/hisabkitab/ui/screens/BillsScreens.kt:230-241`
-- Payment is a separate DAO transaction:
-  `app/src/main/java/com/amg/hisabkitab/data/local/HisabKitabDao.kt:159-193`
-- Item add/update/delete does not verify bill status:
-  `app/src/main/java/com/amg/hisabkitab/data/local/HisabKitabDao.kt:140-157`
+Manifest enables backup (`AndroidManifest.xml:14-16`), while both rule files remain templates and `data_extraction_rules.xml` contains a TODO.
 
-`updateCustomer` reads a complete active `BillEntity`, then later writes that
-stale copy. Payment or cancellation can execute between those operations. The
-stale update can change a paid bill back to `ACTIVE`, or cancellation can
-overwrite a just-paid bill as `CANCELLED` after stock has already been reduced.
-Item addition, quantity changes, and removal also do not enforce active status
-below the UI.
+**Impact:** financial data may enter OS/cloud backup under defaults without a deliberate policy.
 
-Payment returns `Success` for missing or non-active bills, so callers cannot
-distinguish completed payment from a conflict or no-op.
+**Fix:** explicitly include/exclude database/preferences in both rule formats, or disable platform backup.
 
-**Impact:** Bill status and inventory can diverge under rapid UI actions,
-process replays, or future multi-window/background flows.
+## Product and Test Gaps
 
-**Fix:** Move every bill mutation into DAO transactions that perform conditional
-SQL updates requiring `status = ACTIVE`. Update only intended columns,
-serialize payment/cancellation against edits, and return typed not-found or
-status-conflict results.
+Not counted above:
 
-## Medium-Severity Findings
+- PDF/CSV export described in `README.md` is absent.
+- Home active-bill cards still use a separate Open button.
+- Average-bill and explicit recent-bills views are missing.
+- Release optimization is disabled.
 
-### HK-008 - Payment warning state leaks across bill screens
+Priority missing tests: loss-referenced deletion; stale-edit concurrency; arithmetic boundaries; concurrent backup snapshot; hostile restore; IST ranges/rollover; discrepancy persistence; operation error UI; camera/unknown barcode; widget refresh.
 
-**Evidence:**
+## Build Notes
 
-- Warning state is global to `BillsViewModel`: `app/src/main/java/com/amg/hisabkitab/ui/viewmodel/ShopViewModels.kt:97-102`
-- Every detail screen receives the same shortage list:
-  `app/src/main/java/com/amg/hisabkitab/ui/navigation/HisabKitabApp.kt:133-148`
+Lint has **22 warnings and 0 errors**, mostly dependency advisories plus deprecated APIs and an unchecked heterogeneous `combine` cast. `assembleRelease` completed successfully and produced the unsigned release APK.
 
-After a shortage warning, navigating back and opening another bill can show the
-old warning. Confirming it pays the original pending bill and pops the currently
-displayed screen.
+The audit does not claim runtime device verification. Room instrumentation tests were packaged but not executed, and no Compose UI tests cover primary journeys.
 
-**Fix:** Scope the warning to the displayed bill ID, clear it when leaving the
-bill, and reject force payment unless displayed and pending IDs match.
+## Fix Order
 
----
-
-### HK-009 - Forced payment discards the stock discrepancy
-
-**Evidence:**
-
-- Stock is clamped to zero: `app/src/main/java/com/amg/hisabkitab/data/local/HisabKitabDao.kt:175-183`
-- The README expects later reconciliation of stock mismatches.
-
-The missing quantity is not stored after "Mark Paid Anyway", so the discrepancy
-cannot be explained or reconciled later.
-
-**Fix:** Persist a discrepancy record containing bill, product, expected stock,
-sold quantity, deficit, and timestamp.
-
----
-
-### HK-010 - Restore validation permits destructive or invalid states
-
-**Evidence:**
-
-- Limited validation: `app/src/main/java/com/amg/hisabkitab/data/repository/BackupCodec.kt:27-44`
-- Restore inserts use `REPLACE`: `app/src/main/java/com/amg/hisabkitab/data/local/HisabKitabDao.kt:93-103`
-
-Restore does not reject duplicate item/loss IDs, duplicate SKU/barcodes,
-non-positive IDs, negative values, invalid timestamps, multiple settings rows,
-or invalid bill states such as `PAID` without payment metadata. `REPLACE` can
-silently delete or overwrite rows when a supposedly validated backup conflicts.
-
-**Fix:** Validate every entity and cross-entity invariant before clearing data,
-require unique positive IDs and business keys, and use aborting inserts.
-
----
-
-### HK-011 - Large backup and restore operations can freeze the UI
-
-**Evidence:**
-
-- Backup string is written outside the IO context:
-  `app/src/main/java/com/amg/hisabkitab/MainActivity.kt:32-38`
-- Restore parsing and validation run after the IO read:
-  `app/src/main/java/com/amg/hisabkitab/MainActivity.kt:51-60`
-- JSON is fully materialized in memory:
-  `app/src/main/java/com/amg/hisabkitab/data/repository/BackupCodec.kt:16-44`
-
-Large backups can block the main thread during output writing, JSON parsing, and
-validation. Oversized selected files can also cause substantial memory use.
-
-**Fix:** Run read, parse, validate, encode, and write on `Dispatchers.IO`; use
-streaming where practical and enforce file-size/entity-count limits.
-
----
-
-### HK-012 - Bill numbers are collision-prone and not unique
-
-**Evidence:**
-
-- Process-local sequence: `app/src/main/java/com/amg/hisabkitab/data/repository/ShopRepository.kt:20,38-47`
-- No unique bill-number constraint: `app/src/main/java/com/amg/hisabkitab/data/local/Entities.kt:29-39`
-
-The timestamp component repeats every 100 seconds. The one-digit sequence wraps
-every ten bills and resets after process death, so duplicate invoice numbers are
-possible and accepted by the database.
-
-**Fix:** Generate bill numbers from a database-backed sequence or inserted bill
-ID and enforce uniqueness in the schema.
-
----
-
-### HK-013 - Unknown scanned barcodes fail silently
-
-**Evidence:**
-
-- Repository returns match status: `app/src/main/java/com/amg/hisabkitab/data/repository/ShopRepository.kt:56-60`
-- Navigation ignores status and always closes scanner:
-  `app/src/main/java/com/amg/hisabkitab/ui/navigation/HisabKitabApp.kt:151-166`
-
-When scanning into a bill, an unknown barcode closes the scanner without adding
-an item or explaining why.
-
-**Fix:** Keep the scanner open on no match and offer manual search or product
-creation with a visible message.
-
----
-
-### HK-014 - Scanner can fail without a usable back camera
-
-**Evidence:**
-
-- Camera hardware is optional: `app/src/main/AndroidManifest.xml:5-7`
-- Provider acquisition and binding are unguarded:
-  `app/src/main/java/com/amg/hisabkitab/ui/scanner/BarcodeScannerScreen.kt:109-142`
-
-`cameraProviderFuture.get()` or `bindToLifecycle` can throw when the back camera
-is absent, occupied, unavailable, or disabled by policy. Permanent permission
-denial also provides no manual-entry or settings path.
-
-**Fix:** Check camera availability, catch provider/binding failures, and provide
-manual barcode entry plus a permission-settings action.
-
----
-
-### HK-015 - Settings present features that are not implemented
-
-**Evidence:** `app/src/main/java/com/amg/hisabkitab/ui/screens/SettingsScreen.kt:127-154`
-
-Notification and PIN switches only persist booleans. There is no notification
-scheduling, notification permission flow, PIN setup, or PIN enforcement.
-Appearance and support rows are clickable but do nothing.
-
-**Fix:** Hide or clearly label unfinished controls, or implement the complete
-workflows before release.
-
----
-
-### HK-016 - Android platform backup lacks an explicit financial-data policy
-
-**Evidence:**
-
-- `app/src/main/AndroidManifest.xml:12-20`
-- `app/src/main/res/xml/backup_rules.xml`
-- `app/src/main/res/xml/data_extraction_rules.xml`
-
-`android:allowBackup="true"` is enabled while the rules remain templates. Shop
-financial records may be copied through cloud backup or device transfer outside
-the app's explicit file-picker backup workflow.
-
-**Fix:** Deliberately disable platform backup or define and test exact
-include/exclude rules.
-
----
-
-### HK-017 - Time-based summaries do not roll over without a data emission
-
-**Evidence:**
-
-- Day start is calculated only inside the combined-flow transform:
-  `app/src/main/java/com/amg/hisabkitab/ui/viewmodel/ShopViewModels.kt:210-221`
-- Month boundaries are calculated only on source/period emissions:
-  `app/src/main/java/com/amg/hisabkitab/ui/viewmodel/ShopViewModels.kt:224-281`
-
-If the app remains open across midnight, Home can continue showing yesterday's
-sales until a bill, product, setting, or selected period changes. The same issue
-applies across a month boundary. Today's filter also has no exclusive next-day
-upper bound, so future-dated restored records can appear in today's totals.
-
-**Fix:** Add a lifecycle-aware clock/day flow that emits at local midnight,
-calculate bounded `[start, end)` periods, and recompute on resume.
-
----
-
-### HK-018 - Sales trend removes no-sale days and misrepresents spacing
-
-**Evidence:**
-
-- Revenue is grouped only for dates containing paid bills:
-  `app/src/main/java/com/amg/hisabkitab/ui/viewmodel/ShopViewModels.kt:235-240`
-- The chart draws compact values as equally spaced bars:
-  `app/src/main/java/com/amg/hisabkitab/ui/screens/AnalyticsScreen.kt:220-239`
-
-For sales on June 1 and June 10 only, the chart receives two values and renders
-them as adjacent bars. It contains neither zero-value dates nor date labels, so
-the trend does not represent the selected period's actual timeline.
-
-**Fix:** Produce a complete date-indexed series for every day in the selected
-range, filling missing dates with zero, and render date context on the chart.
-
-## Feature Gaps Against README / Product Expectations
-
-- No `Today` analytics filter.
-- No items-sold or average-bill metrics.
-- No PDF or CSV exports.
-- No Home recent-bills section.
-- No category model/filter for Inventory.
-- No restock or stock-adjustment history.
-- No actual low-stock notification workflow.
-- No actual PIN security workflow.
-
-## Test Coverage Gaps
-
-Current JVM coverage is four tests. The Android test APK builds, and one
-instrumented test exercises the normal payment path, but the risky paths below
-are uncovered:
-
-1. Product deletion while referenced by active bills and losses.
-2. Missing-product payment.
-3. Duplicate SKU/barcode errors without app termination.
-4. Edit/payment and cancel/payment races.
-5. Paid/cancelled bill immutability.
-6. IST custom-date boundaries and midnight/month rollover.
-7. Sparse daily chart ranges with zero-sale dates.
-8. Loss quantity greater than stock.
-9. Negative, oversized, excess-scale, and overflowing values.
-10. Forced-payment discrepancy persistence.
-11. Concurrent backup consistency and malformed restore files.
-12. Bill-number uniqueness after process/repository recreation.
-13. Cross-bill shortage-warning state.
-14. Unknown barcode, denied permission, and unavailable-camera behavior.
-
-## Lint and Build Notes
-
-Lint reported 22 warnings and no errors:
-
-- 18 dependency/version warnings.
-- 1 newer Kotlin version warning.
-- 1 old target API warning.
-- 1 redundant manifest label.
-- 1 unused resource.
-
-The compiler/build output also reported an experimental
-`android.disallowKotlinSourceSets=false` option and the sandboxed Android
-analytics-settings write warning. These are lower priority than the runtime and
-data-integrity findings above.
-
-## Suggested Fix Order
-
-1. Lock down bill lifecycle transitions:
-   - Conditional DAO updates requiring `status = ACTIVE`.
-   - Typed `PaymentResult` values for success, not found, invalid status,
-     missing product, and insufficient stock.
-   - Tests for concurrent edit/payment/cancel behavior.
-
-2. Lock down product and inventory invariants:
-   - Domain/repository validation for money, quantities, thresholds, and
-     overflow.
-   - Product deletion checks for active bill references and loss history.
-   - Visible UI errors for duplicate SKU/barcode and restricted deletion.
-
-3. Fix analytics correctness:
-   - `LocalDate`-based custom ranges in `Asia/Kolkata`.
-   - Bounded Home "today" windows and lifecycle midnight refresh.
-   - Complete date series for trend charts.
-
-4. Harden backup/restore:
-   - Transactional backup snapshot.
-   - Full restore validation before destructive replace.
-   - IO dispatching and size/entity limits.
-
-5. Clean up release UX/policy gaps:
-   - Scanner failure handling and unknown-barcode feedback.
-   - Implement or hide notification/PIN/appearance/support controls.
-   - Decide Android platform backup policy.
+1. HK-001 through HK-005 with regression tests.
+2. UI error handling and forced-payment discrepancy.
+3. Date boundaries, bill-scoped state, invoice sequence.
+4. Scanner, rollover, chart, widgets, and backup scaling.
+5. Finish/hide settings and define platform-backup policy.
+6. Add device UI/instrumentation coverage and remaining product features.

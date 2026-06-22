@@ -3,6 +3,7 @@ package com.amg.hisabkitab.ui.navigation
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -35,7 +36,10 @@ fun HisabKitabApp(
     settingsMessage: String?,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
-    onClearSettingsMessage: () -> Unit
+    onClearSettingsMessage: () -> Unit,
+    launchAction: String? = null,
+    launchBillId: Long? = null,
+    onLaunchActionConsumed: () -> Unit = {}
 ) {
     val nav = rememberNavController()
     val scope = rememberCoroutineScope()
@@ -53,6 +57,7 @@ fun HisabKitabApp(
     )
 
     val inventoryState by inventory.state.collectAsState()
+    val newProductBarcode by inventory.newProductBarcode.collectAsState()
     val billsState by bills.state.collectAsState()
     val dashboardState by dashboard.dashboard.collectAsState()
     val analyticsState by dashboard.analytics.collectAsState()
@@ -70,6 +75,27 @@ fun HisabKitabApp(
         scope.launch {
             val id = bills.createBill(null)
             nav.navigate("bill/$id")
+        }
+    }
+
+    LaunchedEffect(launchAction, launchBillId) {
+        when {
+            launchBillId != null -> {
+                nav.navigate("bill/$launchBillId")
+                onLaunchActionConsumed()
+            }
+            launchAction == AppLaunchActions.NewBill -> {
+                val id = bills.createBill(null)
+                nav.navigate("bill/$id")
+                onLaunchActionConsumed()
+            }
+            launchAction == AppLaunchActions.AddItem -> {
+                nav.navigate("inventory?addProduct=true") {
+                    popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                    launchSingleTop = true
+                }
+                onLaunchActionConsumed()
+            }
         }
     }
 
@@ -97,7 +123,6 @@ fun HisabKitabApp(
                 onNavigate = ::navigateMain,
                 onSettings = { nav.navigate("settings") },
                 onPeriod = dashboard::setPeriod,
-                onCustomRange = dashboard::setCustomRange,
                 onRecordLoss = dashboard::recordLoss
             )
         }
@@ -112,9 +137,16 @@ fun HisabKitabApp(
                 onOpen = { nav.navigate("bill/$it") }
             )
         }
-        composable("inventory") {
+        composable(
+            route = "inventory?addProduct={addProduct}",
+            arguments = listOf(navArgument("addProduct") {
+                type = NavType.BoolType
+                defaultValue = false
+            })
+        ) { entry ->
             InventoryScreen(
                 state = inventoryState,
+                showAddProductOnOpen = entry.arguments?.getBoolean("addProduct") == true,
                 onNavigate = ::navigateMain,
                 onSettings = { nav.navigate("settings") },
                 onQuery = inventory::setQuery,
@@ -123,7 +155,9 @@ fun HisabKitabApp(
                 onSave = inventory::save,
                 onDelete = inventory::delete,
                 onRestock = inventory::restock,
-                onScan = { nav.navigate("scanner/0") }
+                onScan = { nav.navigate("scanner/0") },
+                newProductBarcode = newProductBarcode,
+                onNewProductBarcodeConsumed = inventory::consumeNewProductBarcode
             )
         }
         composable(
@@ -157,11 +191,16 @@ fun HisabKitabApp(
                 onBack = { nav.popBackStack() },
                 onDetected = { barcode ->
                     if (billId == 0L) {
-                        inventory.setQuery(barcode)
-                        nav.popBackStack()
+                        inventory.handleScannedBarcode(barcode) { nav.popBackStack() }
                     } else {
-                        bills.addBarcode(billId, barcode) {
-                            nav.popBackStack()
+                        bills.addBarcode(billId, barcode) { added ->
+                            if (added) {
+                                nav.popBackStack()
+                            } else {
+                                inventory.handleScannedBarcode(barcode) {
+                                    navigateMain("inventory")
+                                }
+                            }
                         }
                     }
                 }
@@ -179,4 +218,10 @@ fun HisabKitabApp(
             )
         }
     }
+}
+
+object AppLaunchActions {
+    const val NewBill = "com.amg.hisabkitab.action.NEW_BILL"
+    const val AddItem = "com.amg.hisabkitab.action.ADD_ITEM"
+    const val OpenBill = "com.amg.hisabkitab.action.OPEN_BILL"
 }

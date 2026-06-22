@@ -1,29 +1,32 @@
 package com.amg.hisabkitab.ui.screens
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.DateRangePicker
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDateRangePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,11 +54,9 @@ fun AnalyticsScreen(
     onNavigate: (String) -> Unit,
     onSettings: () -> Unit,
     onPeriod: (AnalyticsPeriod) -> Unit,
-    onCustomRange: (Long, Long) -> Unit,
     onRecordLoss: (Long, Int, LossReason, String?) -> Unit
 ) {
     var showLoss by remember { mutableStateOf(false) }
-    var showRange by remember { mutableStateOf(false) }
     AppScaffold(
         title = "Analytics",
         currentRoute = "analytics",
@@ -69,26 +70,28 @@ fun AnalyticsScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item {
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    AnalyticsPeriod.entries.forEachIndexed { index, period ->
-                        SegmentedButton(
-                            selected = state.period == period,
-                            onClick = {
-                                if (period == AnalyticsPeriod.CUSTOM) showRange = true
-                                else onPeriod(period)
-                            },
-                            shape = SegmentedButtonDefaults.itemShape(
-                                index = index,
-                                count = AnalyticsPeriod.entries.size
-                            )
-                        ) {
-                            Text(
-                                when (period) {
-                                    AnalyticsPeriod.THIS_MONTH -> "This Month"
-                                    AnalyticsPeriod.LAST_MONTH -> "Last Month"
-                                    AnalyticsPeriod.CUSTOM -> "Custom"
-                                }
+                                    item {
+                var expanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded }
+                ) {
+                    OutlinedTextField(
+                        value = state.period.label(),
+                        onValueChange = {},
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        readOnly = true,
+                        label = { Text("Date range") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        AnalyticsPeriod.entries.forEach { period ->
+                            DropdownMenuItem(
+                                text = { Text(period.label()) },
+                                onClick = { onPeriod(period); expanded = false }
                             )
                         }
                     }
@@ -151,6 +154,7 @@ fun AnalyticsScreen(
                 HkCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(20.dp)) {
                         Text("Net Profit", style = MaterialTheme.typography.titleLarge)
+                        Spacer(Modifier.size(4.dp))
                         Text(
                             money(state.netProfitPaise),
                             style = MaterialTheme.typography.headlineMedium,
@@ -193,28 +197,6 @@ fun AnalyticsScreen(
             }
         )
     }
-    if (showRange) {
-        val rangeState = rememberDateRangePickerState()
-        DatePickerDialog(
-            onDismissRequest = { showRange = false },
-            confirmButton = {
-                TextButton(
-                    enabled = rangeState.selectedStartDateMillis != null &&
-                        rangeState.selectedEndDateMillis != null,
-                    onClick = {
-                        onCustomRange(
-                            rangeState.selectedStartDateMillis!!,
-                            rangeState.selectedEndDateMillis!!
-                        )
-                        showRange = false
-                    }
-                ) { Text("Apply") }
-            },
-            dismissButton = { TextButton(onClick = { showRange = false }) { Text("Cancel") } }
-        ) {
-            DateRangePicker(state = rangeState, modifier = Modifier.fillMaxWidth())
-        }
-    }
 }
 
 @Composable
@@ -245,61 +227,87 @@ private fun AnalyticsMetric(title: String, value: Long) {
     HkCard(Modifier.fillMaxWidth(), outlined = true) {
         Column(Modifier.padding(20.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.size(4.dp))
             Text(money(value), style = MaterialTheme.typography.headlineMedium)
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LossDialog(
     products: List<ProductEntity>,
     onDismiss: () -> Unit,
     onSave: (Long, Int, LossReason, String?) -> Unit
 ) {
-    var selected by remember { mutableStateOf(products.firstOrNull()?.id) }
+    var selected by remember { mutableStateOf<Long?>(null) }
+    var productExpanded by remember { mutableStateOf(false) }
     var quantity by remember { mutableStateOf("") }
     var reason by remember { mutableStateOf(LossReason.EXPIRED) }
     var note by remember { mutableStateOf("") }
+    val selectedProduct = products.firstOrNull { it.id == selected }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Record inventory loss") },
         text = {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                item { Text("Product", style = MaterialTheme.typography.labelLarge) }
-                items(products, key = { it.id }) { product ->
-                    androidx.compose.material3.FilterChip(
-                        selected = selected == product.id,
-                        onClick = { selected = product.id },
-                        label = { Text(product.name) }
-                    )
-                }
-                item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ExposedDropdownMenuBox(
+                    expanded = productExpanded,
+                    onExpandedChange = { productExpanded = !productExpanded }
+                ) {
                     OutlinedTextField(
-                        quantity,
-                        { quantity = it.filter(Char::isDigit) },
-                        label = { Text("Quantity") },
-                        suffix = { Text("units") },
-                        singleLine = true
+                        value = selectedProduct?.name.orEmpty(),
+                        onValueChange = {},
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        readOnly = true,
+                        label = { Text("Product") },
+                        placeholder = { Text("Choose a product") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(productExpanded) }
                     )
+                    ExposedDropdownMenu(
+                        expanded = productExpanded,
+                        onDismissRequest = { productExpanded = false }
+                    ) {
+                        products.forEach { product ->
+                            DropdownMenuItem(
+                                text = { Text(product.name) },
+                                onClick = { selected = product.id; productExpanded = false }
+                            )
+                        }
+                    }
                 }
-                item { Text("Reason", style = MaterialTheme.typography.labelLarge) }
-                items(LossReason.entries) { entry ->
-                    androidx.compose.material3.FilterChip(
-                        selected = reason == entry,
-                        onClick = { reason = entry },
-                        label = {
-                            Text(entry.name.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() })
+                if (selectedProduct != null) {
+                    androidx.compose.material3.ListItem(
+                        headlineContent = { Text(selectedProduct.name) },
+                        supportingContent = { Text("${selectedProduct.stockQuantity} units available") },
+                        trailingContent = {
+                            IconButton(onClick = { selected = null }) {
+                                Icon(Icons.Outlined.Clear, contentDescription = "Remove selected product")
+                            }
                         }
                     )
                 }
-                item {
-                    OutlinedTextField(
-                        note,
-                        { note = it },
-                        label = { Text("Note") },
-                        supportingText = { Text("Optional") }
+                OutlinedTextField(
+                    value = quantity,
+                    onValueChange = { quantity = it.filter(Char::isDigit) },
+                    label = { Text("Quantity") },
+                    suffix = { Text("units") },
+                    singleLine = true
+                )
+                Text("Reason", style = MaterialTheme.typography.labelLarge)
+                LossReason.entries.forEach { entry ->
+                    androidx.compose.material3.FilterChip(
+                        selected = reason == entry,
+                        onClick = { reason = entry },
+                        label = { Text(entry.name.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }) }
                     )
                 }
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("Note") },
+                    supportingText = { Text("Optional") }
+                )
             }
         },
         confirmButton = {
@@ -312,6 +320,12 @@ private fun LossDialog(
     )
 }
 
+private fun AnalyticsPeriod.label(): String = when (this) {
+    AnalyticsPeriod.TODAY -> "Today"
+    AnalyticsPeriod.YESTERDAY -> "Yesterday"
+    AnalyticsPeriod.THIS_WEEK -> "This Week"
+    AnalyticsPeriod.LAST_WEEK -> "Last Week"
+}
 @androidx.compose.ui.tooling.preview.Preview(showBackground = true)
 @androidx.compose.runtime.Composable
 fun AnalyticsScreenPreview() {
@@ -335,7 +349,6 @@ fun AnalyticsScreenPreview() {
             onNavigate = {},
             onSettings = {},
             onPeriod = {},
-            onCustomRange = { _, _ -> },
             onRecordLoss = { _, _, _, _ -> }
         )
     }
